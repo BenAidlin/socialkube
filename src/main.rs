@@ -29,6 +29,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // FR-3 Hardware Benchmarking
     let hw_profile = engine::benchmark::detect_hardware();
     info!("Local Hardware Profile: {:?}", hw_profile);
+
+    // Initialize Economy Ledger
+    let ledger = economy::ledger::Ledger::new("socialkube.db")?;
     
     // Initialize P2P Host
     let mut swarm = p2p::host::build_swarm().await?;
