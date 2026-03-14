@@ -5,6 +5,7 @@
         "Kademlia",
         "libp",
         "mdns",
-        "socialkube"
+        "socialkube",
+        "yamux"
     ]
 }

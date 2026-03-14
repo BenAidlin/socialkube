@@ -1,11 +1,28 @@
-use libp2p::{identity, PeerId};
+use libp2p::{
+    identity,
+    noise,
+    swarm::Swarm,
+    SwarmBuilder,
+    tcp, yamux, PeerId,
+};
 use std::error::Error;
+use crate::p2p::behaviour::SocialKubeBehaviour;
 
-pub async fn setup_node() -> Result<(PeerId, identity::Keypair), Box<dyn Error>> {
+pub async fn build_swarm() -> Result<Swarm<SocialKubeBehaviour>, Box<dyn Error>> {
     let local_key = identity::Keypair::generate_ed25519();
     let local_peer_id = PeerId::from(local_key.public());
-    
-    // Swarm setup would go here in next step
-    
-    Ok((local_peer_id, local_key))
+
+    let swarm = SwarmBuilder::with_existing_identity(local_key)
+        .with_tokio()
+        .with_tcp(
+            tcp::Config::default(),
+            noise::Config::new,
+            yamux::Config::default,
+        )?
+        .with_behaviour(|key| {
+            SocialKubeBehaviour::new(local_peer_id, key.clone()).expect("Failed to initialize behaviour")
+        })?
+        .build();
+
+    Ok(swarm)
 }
