@@ -25,6 +25,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let _span = info_span!("node_main").entered();
     info!("--- SocialKube Node Starting ---");
+
+    // FR-3 Hardware Benchmarking
+    let hw_profile = engine::benchmark::detect_hardware();
+    info!("Local Hardware Profile: {:?}", hw_profile);
     
     // Initialize P2P Host
     let mut swarm = p2p::host::build_swarm().await?;
