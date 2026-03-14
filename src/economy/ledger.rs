@@ -74,3 +74,42 @@ impl Ledger {
         Ok(true)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ledger_initialization() {
+        let ledger = Ledger::new(":memory:").unwrap();
+        assert_eq!(ledger.get_balance("peer1").unwrap(), 0);
+    }
+
+    #[test]
+    fn test_add_and_get_balance() {
+        let ledger = Ledger::new(":memory:").unwrap();
+        
+        ledger.add_credits("peer1", 100).unwrap();
+        assert_eq!(ledger.get_balance("peer1").unwrap(), 100);
+        
+        ledger.add_credits("peer1", 50).unwrap();
+        assert_eq!(ledger.get_balance("peer1").unwrap(), 150);
+    }
+
+    #[test]
+    fn test_spend_credits() {
+        let ledger = Ledger::new(":memory:").unwrap();
+        
+        ledger.add_credits("peer1", 100).unwrap();
+        
+        // Successful spend
+        let success = ledger.spend_credits("peer1", 40).unwrap();
+        assert!(success);
+        assert_eq!(ledger.get_balance("peer1").unwrap(), 60);
+        
+        // Insufficient funds
+        let success = ledger.spend_credits("peer1", 100).unwrap();
+        assert!(!success);
+        assert_eq!(ledger.get_balance("peer1").unwrap(), 60);
+    }
+}
