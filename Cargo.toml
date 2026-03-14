@@ -8,7 +8,7 @@ edition = "2021"
 tokio = { version = "1.0", features = ["full"] }
 
 # P2P Networking
-libp2p = { version = "0.53", features = ["tcp", "noise", "yamux", "gossipsub", "kad", "identify", "tokio"] }
+libp2p = { version = "0.53", features = ["tcp", "noise", "yamux", "gossipsub", "kad", "identify", "tokio", "mdns", "macros"] }
 
 # API & Web
 axum = "0.7"

@@ -1,9 +1,8 @@
 use libp2p::kad::store::MemoryStore;
-use libp2p::kad::{Kademlia, KademliaEvent};
-use libp2p::gossipsub::{Gossipsub, GossipsubEvent, MessageAuthenticity, ConfigBuilder};
+use libp2p::kad::{Behaviour as Kademlia, Event as KademliaEvent};
+use libp2p::gossipsub::{Behaviour as Gossipsub, Event as GossipsubEvent, MessageAuthenticity, ConfigBuilder};
 use libp2p::swarm::NetworkBehaviour;
 use libp2p::{identify, mdns, PeerId};
-use serde::{Deserialize, Serialize};
 
 // Define the "SocialKube" Gossip Topic
 pub const SOCIALKUBE_TASK_TOPIC: &str = "socialkube-inference-tasks";
