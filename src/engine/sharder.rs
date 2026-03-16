@@ -11,42 +11,91 @@ pub struct ShardMetadata {
     pub vram_required_gb: f32,
 }
 
-/// Calculates which layers of a model this node should host based on its hardware.
-pub fn calculate_shard_assignment(model_id: &str, total_layers: usize, hw: &HardwareProfile) -> ShardMetadata {
-    let available_vram = hw.vram_gb.unwrap_or(0);
-    let available_ram = hw.total_ram_gb;
-
-    // Very rough heuristic:
-    // Assume each layer takes ~0.5GB (for a 7B-30B model quantized)
-    let layer_cost_gb = 0.5;
-    
-    let max_layers_vram = if available_vram > 0 {
-        (available_vram as f32 / layer_cost_gb).floor() as usize
-    } else {
-        0
-    };
-
-    let max_layers_ram = (available_ram as f32 * 0.5 / layer_cost_gb).floor() as usize; // Use only 50% of system RAM
-    
-    let can_host_layers = std::cmp::max(max_layers_vram, max_layers_ram);
-    let layers_to_host = std::cmp::min(can_host_layers, total_layers);
-
-    // For simplicity in this version, host the first N layers.
-    // In a real swarm, this would be negotiated based on what's missing.
-    let shard = ShardMetadata {
-        model_id: model_id.to_string(),
-        total_layers,
-        start_layer: 0,
-        end_layer: layers_to_host,
-        vram_required_gb: layers_to_host as f32 * layer_cost_gb,
-    };
-
-    info!("Calculated Shard Assignment: host {} to {} of {} layers", shard.start_layer, shard.end_layer, total_layers);
-    shard
+#[derive(Debug, Clone)]
+pub struct ModelConfig {
+    pub model_id: String,
+    pub total_layers: usize,
+    pub layer_cost_gb: f32,
 }
 
-/// Helper to parse GGUF metadata (Placeholder for actual candle logic)
-pub fn get_model_layer_count(_path: &str) -> usize {
-    // For now, return a default for Llama-3-8B
-    32
+/// Returns the configuration for a given model.
+pub fn get_model_config(model_id: &str) -> ModelConfig {
+    match model_id {
+        "llama-3.2-1b" => ModelConfig {
+            model_id: "llama-3.2-1b".to_string(),
+            total_layers: 16,
+            layer_cost_gb: 0.1, // ~1.6GB total for 1B model (quantized)
+        },
+        "llama-3.2-3b" => ModelConfig {
+            model_id: "llama-3.2-3b".to_string(),
+            total_layers: 28,
+            layer_cost_gb: 0.15, // ~4.2GB total
+        },
+        "llama-3-8b" => ModelConfig {
+            model_id: "llama-3-8b".to_string(),
+            total_layers: 32,
+            layer_cost_gb: 0.25, // ~8GB total (4-bit quantization)
+        },
+        _ => ModelConfig {
+            model_id: "generic-7b".to_string(),
+            total_layers: 32,
+            layer_cost_gb: 0.25,
+        },
+    }
+}
+
+/// Calculates which models/layers this node should host.
+/// 1. Every node hosts the full "Lightest" model (1B) for local fallback.
+/// 2. Every node hosts as many layers of the "Standard" model (8B) as remaining RAM/VRAM allows.
+pub fn calculate_shard_assignment(
+    hw: &HardwareProfile
+) -> Vec<ShardMetadata> {
+    let mut assignments = Vec::new();
+    let mut remaining_vram = hw.vram_gb.unwrap_or(0) as f32;
+    let mut remaining_ram = hw.total_ram_gb as f32 * 0.8; // Use up to 80% of RAM total
+
+    // 1. Base Layer: Llama-3.2-1B (Full)
+    let base_config = get_model_config("llama-3.2-1b");
+    let base_cost = base_config.total_layers as f32 * base_config.layer_cost_gb;
+    
+    if remaining_vram >= base_cost || remaining_ram >= base_cost {
+        assignments.push(ShardMetadata {
+            model_id: base_config.model_id.clone(),
+            total_layers: base_config.total_layers,
+            start_layer: 0,
+            end_layer: base_config.total_layers,
+            vram_required_gb: base_cost,
+        });
+        
+        if remaining_vram >= base_cost {
+            remaining_vram -= base_cost;
+        } else {
+            remaining_ram -= base_cost;
+        }
+        info!("Assigned Base Model: {} (Full)", base_config.model_id);
+    }
+
+    // 2. Swarm Layer: Llama-3-8B (As many layers as fit)
+    let swarm_config = get_model_config("llama-3-8b");
+    let layer_cost = swarm_config.layer_cost_gb;
+    
+    let max_layers_vram = (remaining_vram / layer_cost).floor() as usize;
+    let max_layers_ram = (remaining_ram / layer_cost).floor() as usize;
+    let layers_to_host = std::cmp::min(
+        std::cmp::max(max_layers_vram, max_layers_ram),
+        swarm_config.total_layers
+    );
+
+    if layers_to_host > 0 {
+        assignments.push(ShardMetadata {
+            model_id: swarm_config.model_id.clone(),
+            total_layers: swarm_config.total_layers,
+            start_layer: 0,
+            end_layer: layers_to_host,
+            vram_required_gb: layers_to_host as f32 * layer_cost,
+        });
+        info!("Assigned Swarm Shard: {} ({} layers)", swarm_config.model_id, layers_to_host);
+    }
+
+    assignments
 }
