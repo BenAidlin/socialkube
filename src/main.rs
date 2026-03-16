@@ -30,6 +30,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let hw_profile = engine::benchmark::detect_hardware();
     info!("Local Hardware Profile: {:?}", hw_profile);
 
+    // Calculate Shard Assignment
+    let shard_info = engine::sharder::calculate_shard_assignment("llama-3-8b", 32, &hw_profile);
+    info!("Node will host layers {} to {} of {}", shard_info.start_layer, shard_info.end_layer, shard_info.model_id);
+
     // Initialize P2P Host
     let mut swarm = p2p::host::build_swarm().await?;
     let local_peer_id = swarm.local_peer_id().to_string();
