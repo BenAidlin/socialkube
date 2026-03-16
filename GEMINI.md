@@ -35,5 +35,5 @@ SocialKube is a decentralized P2P compute network written in Rust. It allows use
 - [x] **DuckDB Implementation:** Set up `sqlx` with DuckDB (or SQLite as a fallback) in `src/economy/ledger.rs` to track user credits.
 - [ ] **Model Sharding Logic:** Implement the `sharder.rs` module to handle loading and splitting model GGUF/Safetensors files.
 - [ ] **API & Web Connection:** Build the Axum routes in `src/api/` and connect them to the Next.js frontend in `/web`.
-- [ ] **Inference Request/Response:** Implement a P2P request-response protocol for sending/receiving inference prompts between peers.
+- [x] **Inference Request/Response:** Implement a P2P request-response protocol for sending/receiving inference prompts between peers.
 - [ ] **WAN Support & NAT Traversal:** Implement Relay v2, Hole Punching (dcutr), and AutoNAT to enable connectivity across different ISPs (Section 2.2 of PRD).

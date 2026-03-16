@@ -30,12 +30,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let hw_profile = engine::benchmark::detect_hardware();
     info!("Local Hardware Profile: {:?}", hw_profile);
 
-    // Initialize Economy Ledger
-    let ledger = economy::ledger::Ledger::new("socialkube.db")?;
-    
     // Initialize P2P Host
     let mut swarm = p2p::host::build_swarm().await?;
-    info!("Node initialized with PeerID: {}", swarm.local_peer_id());
+    let local_peer_id = swarm.local_peer_id().to_string();
+    info!("Node initialized with PeerID: {}", local_peer_id);
+
+    // Initialize Economy Ledger with a unique filename for this peer in the 'ledger' directory
+    let db_name = format!("ledger/socialkube_{}.db", &local_peer_id);
+    let ledger = economy::ledger::Ledger::new(&db_name)?;
 
     // Subscribe to Gossipsub topic
     let topic = gossipsub::IdentTopic::new(SOCIALKUBE_TASK_TOPIC);
@@ -51,7 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         tokio::select! {
             _ = tick.tick() => {
-                let message = format!("Heartbeat from {}", swarm.local_peer_id());
+                let message = format!("Heartbeat from {}", local_peer_id);
                 if let Err(e) = swarm.behaviour_mut().gossipsub.publish(topic.clone(), message.as_bytes()) {
                     tracing::error!("Publish error: {:?}", e);
                 }
@@ -68,6 +70,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         info!("mDNS discovered: {} at {}", peer_id, multiaddr);
                         swarm.behaviour_mut().kademlia.add_address(&peer_id, multiaddr.clone());
                         let _ = swarm.dial(multiaddr);
+
+                        // TEST: Trigger an inference request to the newly discovered peer
+                        if let Ok(can_spend) = ledger.spend_credits(&local_peer_id, 10) {
+                            if can_spend {
+                                let request = p2p::behaviour::InferenceRequest {
+                                    model_id: "llama-3-8b".to_string(),
+                                    prompt: "What is the capital of Israel?".to_string(),
+                                    shard_index: 0,
+                                };
+                                info!("Sending InferenceRequest to {}...", peer_id);
+                                swarm.behaviour_mut().request_response.send_request(&peer_id, request);
+                            } else {
+                                info!("Not enough credits to send request to {}", peer_id);
+                                // For testing purposes, give ourselves some credits if we are empty
+                                let _ = ledger.add_credits(&local_peer_id, 100);
+                            }
+                        }
                     }
                 }
                 SwarmEvent::Behaviour(p2p::behaviour::SocialKubeEvent::Gossip(gossipsub::Event::Message { 
@@ -77,6 +96,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 })) => {
                     let msg_str = String::from_utf8_lossy(&message.data);
                     info!("Got message: '{}' from {:?}", msg_str, propagation_source);
+                }
+                SwarmEvent::Behaviour(p2p::behaviour::SocialKubeEvent::RequestResponse(event)) => {
+                    match event {
+                        libp2p::request_response::Event::Message { peer, message } => {
+                            match message {
+                                libp2p::request_response::Message::Request { request, channel, .. } => {
+                                    info!("Received InferenceRequest from {}: {:?}", peer, request);
+                                    
+                                    // 1. Credit the worker locally for the effort
+                                    let _ = ledger.add_credits(&peer.to_string(), 10);
+                                    
+                                    // 2. Respond with a placeholder result
+                                    let response = p2p::behaviour::InferenceResponse {
+                                        result: format!("Computed result for: {}", request.prompt),
+                                    };
+                                    let _ = swarm.behaviour_mut().request_response.send_response(channel, response);
+                                }
+                                libp2p::request_response::Message::Response { response, .. } => {
+                                    info!("Received InferenceResponse from {}: {:?}", peer, response);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
                 }
                 // Handle other events as needed
                 _ => {}

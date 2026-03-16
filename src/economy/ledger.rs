@@ -1,6 +1,6 @@
 use duckdb::{params, Connection, Result};
 use std::sync::{Arc, Mutex};
-use tracing::info;
+use tracing::{info, error};
 
 pub struct Ledger {
     conn: Arc<Mutex<Connection>>,
@@ -9,6 +9,14 @@ pub struct Ledger {
 impl Ledger {
     /// Initializes a new Ledger with a DuckDB file.
     pub fn new(path: &str) -> Result<Self> {
+        // Ensure the parent directory exists
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                error!("Failed to create ledger directory: {:?}", e);
+                duckdb::Error::AppendError // Fallback error type
+            })?;
+        }
+
         let conn = Connection::open(path)?;
         
         // Create initial tables

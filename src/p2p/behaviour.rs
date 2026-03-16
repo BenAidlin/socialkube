@@ -1,11 +1,25 @@
 use libp2p::kad::store::MemoryStore;
 use libp2p::kad::{Behaviour as Kademlia, Event as KademliaEvent};
 use libp2p::gossipsub::{Behaviour as Gossipsub, Event as GossipsubEvent, MessageAuthenticity, ConfigBuilder};
+use libp2p::request_response::{self, json, Event as RequestResponseEvent};
 use libp2p::swarm::NetworkBehaviour;
-use libp2p::{identify, mdns, PeerId};
+use libp2p::{identify, mdns, PeerId, StreamProtocol};
+use serde::{Deserialize, Serialize};
 
 // Define the "SocialKube" Gossip Topic
 pub const SOCIALKUBE_TASK_TOPIC: &str = "socialkube-inference-tasks";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferenceRequest {
+    pub model_id: String,
+    pub prompt: String,
+    pub shard_index: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferenceResponse {
+    pub result: String,
+}
 
 #[derive(NetworkBehaviour)]
 #[behaviour(out_event = "SocialKubeEvent")]
@@ -21,6 +35,9 @@ pub struct SocialKubeBehaviour {
     
     // Identify protocol to exchange public keys and supported protocols
     pub identify: identify::Behaviour,
+
+    // Request-Response for direct inference tasks
+    pub request_response: json::Behaviour<InferenceRequest, InferenceResponse>,
 }
 
 #[derive(Debug)]
@@ -29,6 +46,7 @@ pub enum SocialKubeEvent {
     Gossip(GossipsubEvent),
     Mdns(mdns::Event),
     Identify(identify::Event),
+    RequestResponse(RequestResponseEvent<InferenceRequest, InferenceResponse>),
 }
 
 // Convert sub-module events into our global SocialKubeEvent
@@ -53,6 +71,12 @@ impl From<mdns::Event> for SocialKubeEvent {
 impl From<identify::Event> for SocialKubeEvent {
     fn from(event: identify::Event) -> Self {
         SocialKubeEvent::Identify(event)
+    }
+}
+
+impl From<RequestResponseEvent<InferenceRequest, InferenceResponse>> for SocialKubeEvent {
+    fn from(event: RequestResponseEvent<InferenceRequest, InferenceResponse>) -> Self {
+        SocialKubeEvent::RequestResponse(event)
     }
 }
 
@@ -83,11 +107,21 @@ impl SocialKubeBehaviour {
             local_key.public(),
         ));
 
+        // 5. Setup Request-Response
+        let request_response = json::Behaviour::new(
+            [(
+                StreamProtocol::new("/socialkube/inference/1.0.0"),
+                request_response::ProtocolSupport::Full,
+            )],
+            request_response::Config::default(),
+        );
+
         Ok(Self {
             kademlia,
             gossipsub,
             mdns,
             identify,
+            request_response,
         })
     }
 }
