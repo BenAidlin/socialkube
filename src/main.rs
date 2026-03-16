@@ -34,6 +34,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shard_assignments = engine::sharder::calculate_shard_assignment(&hw_profile);
     info!("Initial assignment: Node hosting {} model(s)", shard_assignments.len());
 
+    // Trigger Model Downloads (Non-blocking check)
+    if let Ok(downloader) = engine::downloader::ModelDownloader::new() {
+        let assignments_clone = shard_assignments.clone();
+        tokio::spawn(async move {
+            downloader.check_and_download_models(&assignments_clone).await;
+        });
+    }
+
     // Initialize P2P Host
     let mut swarm = p2p::host::build_swarm().await?;
     let local_peer_id = swarm.local_peer_id().to_string();
