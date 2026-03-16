@@ -9,7 +9,9 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Env
 use libp2p::futures::StreamExt;
 use libp2p::{swarm::SwarmEvent, mdns, gossipsub};
 use std::time::Duration;
+use std::sync::Arc;
 use crate::p2p::behaviour::SOCIALKUBE_TASK_TOPIC;
+use tower_http::cors::{Any, CorsLayer};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -31,8 +33,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Local Hardware Profile: {:?}", hw_profile);
 
     // Initial Shard Assignment (1B Full + 8B partial)
-    let shard_assignments = engine::sharder::calculate_shard_assignment(&hw_profile);
+    let shard_assignments = Arc::new(engine::sharder::calculate_shard_assignment(&hw_profile));
     info!("Initial assignment: Node hosting {} model(s)", shard_assignments.len());
+
+    // Initialize Shared Engine Backend
+    let shared_backend = Arc::new(tokio::sync::Mutex::new(None));
+    let app_state = api::routes::AppState {
+        shard_assignments: shard_assignments.as_ref().clone(),
+        hw_profile: hw_profile.clone(),
+        backend: shared_backend.clone(),
+    };
 
     // Trigger Model Downloads (Non-blocking check)
     if let Ok(downloader) = engine::downloader::ModelDownloader::new() {
@@ -41,6 +51,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             downloader.check_and_download_models(&assignments_clone).await;
         });
     }
+
+    // Start Axum API Server (on port 3001 to avoid Next.js conflict)
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+
+    let app = api::routes::create_router(app_state.clone()).layer(cors);
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3001").await?;
+    info!("API Server listening on http://localhost:3001");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
 
     // Initialize P2P Host
     let mut swarm = p2p::host::build_swarm().await?;

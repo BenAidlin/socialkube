@@ -3,7 +3,7 @@ use serde::{Serialize, Deserialize};
 use tracing::info;
 use std::process::Command;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct HardwareProfile {
     pub cpu_model: String,
     pub cpu_cores: usize,

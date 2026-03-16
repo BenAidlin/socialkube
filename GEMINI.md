@@ -39,6 +39,6 @@ SocialKube is a decentralized P2P compute network written in Rust. It allows use
 - [x] **Model Sharding Logic:** Implement the `sharder.rs` module to handle loading and splitting model GGUF/Safetensors files.
 - [x] **Model Downloader:** Implement a module to fetch and cache model weights (GGUF/Safetensors) from HuggingFace.
 - [x] **Candle Inference Backend:** Implement the logic to load shards into RAM/VRAM and execute the inference forward pass.
-- [ ] **API & Web Connection:** Build the Axum routes in `src/api/` and connect them to the Next.js frontend in `/web`.
+- [x] **API & Web Connection:** Build the Axum routes in `src/api/` and connect them to the Next.js frontend in `/web`.
 - [x] **Inference Request/Response:** Implement a P2P request-response protocol for sending/receiving inference prompts between peers.
 - [ ] **WAN Support & NAT Traversal:** Implement Relay v2, Hole Punching (dcutr), and AutoNAT to enable connectivity across different ISPs (Section 2.2 of PRD).
