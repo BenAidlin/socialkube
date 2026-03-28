@@ -41,4 +41,8 @@ SocialKube is a decentralized P2P compute network written in Rust. It allows use
 - [x] **Candle Inference Backend:** Implement the logic to load shards into RAM/VRAM and execute the inference forward pass.
 - [x] **API & Web Connection:** Build the Axum routes in `src/api/` and connect them to the Next.js frontend in `/web`.
 - [x] **Inference Request/Response:** Implement a P2P request-response protocol for sending/receiving inference prompts between peers.
+- [ ] **Conversation Memory:** Implement session-based history to allow the model to remember previous turns in a chat.
 - [ ] **WAN Support & NAT Traversal:** Implement Relay v2, Hole Punching (dcutr), and AutoNAT to enable connectivity across different ISPs (Section 2.2 of PRD).
+- [ ] **UI Adjustments:** 
+    - [ ] Auto-scroll down on new conversation messages.
+    - [ ] Markdown parsing and display for LLM responses.

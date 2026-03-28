@@ -1,109 +1,152 @@
 use candle_core::{Device, Tensor};
-use candle_transformers::models::llama as model;
-use candle_nn::VarBuilder;
+use candle_transformers::models::quantized_qwen2 as model;
 use tokenizers::Tokenizer;
 use tracing::info;
 use std::path::PathBuf;
+use std::time::Instant;
 
-pub struct CandleBackend {
-    device: Device,
-    tokenizer: Tokenizer,
-    model: Option<model::Llama>,
-    cache: model::Cache,
-    config: model::Config,
+use crate::error::{Result, SocialKubeError};
+use crate::config;
+
+/// Trait for different LLM inference backends.
+pub trait ModelBackend: Send + Sync {
+    /// Resets the internal state (KV cache) of the model.
+    fn clear_kv_cache(&mut self);
+
+    /// Loads the model weights from the provided paths.
+    fn load_model(&mut self, weights_paths: Vec<PathBuf>) -> Result<()>;
+
+    /// Generates text from a prompt.
+    fn generate_text(&mut self, prompt: &str, max_tokens: usize) -> Result<String>;
 }
 
-impl CandleBackend {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+/// A specialized backend for Qwen2.5 models using GGUF quantization.
+pub struct QwenBackend {
+    device: Device,
+    tokenizer: Tokenizer,
+    model: Option<model::ModelWeights>,
+}
+
+impl QwenBackend {
+    /// Creates a new QwenBackend with an appropriate device.
+    pub fn new() -> Result<Self> {
         let device = if candle_core::utils::cuda_is_available() {
-            Device::new_cuda(0)?
+            Device::new_cuda(0).map_err(|e| SocialKubeError::Inference(format!("CUDA error: {:?}", e)))?
         } else if candle_core::utils::metal_is_available() {
-            Device::new_metal(0)?
+            Device::new_metal(0).map_err(|e| SocialKubeError::Inference(format!("Metal error: {:?}", e)))?
         } else {
             Device::Cpu
         };
         
         info!("Inference Backend Initialized with device: {:?}", device);
 
-        // Load tokenizer from a local file or fallback
-        let tokenizer = Tokenizer::from_file("tokenizer.json")
-            .map_err(|_| "tokenizer.json not found. Please ensure ModelDownloader has run.")?;
-
-        // Default config for initialization
-        let config = model::Config::config_7b_v2(false);
-        let cache = model::Cache::new(true, candle_core::DType::F32, &config, &device)?;
+        let tokenizer_path = config::get_tokenizer_path();
+        let tokenizer = Tokenizer::from_file(&tokenizer_path)
+            .map_err(|e| SocialKubeError::Inference(format!("Failed to load {:?}: {:?}", tokenizer_path, e)))?;
 
         Ok(Self {
             device,
             tokenizer,
             model: None,
-            cache,
-            config,
         })
     }
+}
 
-    /// Loads the weights for a specific model assignment.
-    pub fn load_model(&mut self, weights_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-        info!("Loading model weights from: {:?}", weights_path);
+impl ModelBackend for QwenBackend {
+    fn clear_kv_cache(&mut self) {
+        // Quantized models in candle-transformers reset the cache when index_pos is 0.
+        // We ensure pos 0 is used during prefill.
+    }
+
+    fn load_model(&mut self, weights_paths: Vec<PathBuf>) -> Result<()> {
+        let gguf_path = weights_paths.iter()
+            .find(|p| p.extension().map_or(false, |ext| ext == "gguf"))
+            .ok_or_else(|| SocialKubeError::Inference("No GGUF file found in downloaded paths".into()))?;
+
+        info!("Loading Quantized Qwen2.5 (GGUF) from: {:?}", gguf_path);
         
-        let vb = unsafe {
-            VarBuilder::from_mmaped_safetensors(&[weights_path], candle_core::DType::F32, &self.device)?
-        };
-
-        // Llama-3.2-1B Config (Corrected for candle-transformers 0.8)
-        let config = model::Config {
-            hidden_size: 2048,
-            num_hidden_layers: 16,
-            num_attention_heads: 32,
-            num_key_value_heads: 8,
-            intermediate_size: 8192,
-            vocab_size: 128256,
-            rms_norm_eps: 1e-5,
-            rope_theta: 500000.0,
-            use_flash_attn: false,
-            bos_token_id: Some(128000),
-            eos_token_id: Some(model::LlamaEosToks::Single(128001)),
-            max_position_embeddings: 131072,
-            rope_scaling: None,
-            tie_word_embeddings: false,
-        };
-
-        let llama = model::Llama::load(vb, &config)?;
-        self.cache = model::Cache::new(true, candle_core::DType::F32, &config, &self.device)?;
-        self.model = Some(llama);
-        self.config = config;
+        let mut file = std::fs::File::open(gguf_path)
+            .map_err(|e| SocialKubeError::Inference(format!("Failed to open GGUF file: {:?}", e)))?;
         
-        info!("Model weights loaded successfully.");
+        let model = candle_core::quantized::gguf_file::Content::read(&mut file)
+            .map_err(|e| SocialKubeError::Inference(format!("Failed to read GGUF content: {:?}", e)))?;
+        
+        let weights = model::ModelWeights::from_gguf(model, &mut file, &self.device)
+            .map_err(|e| SocialKubeError::Inference(format!("Failed to load ModelWeights from GGUF: {:?}", e)))?;
+        
+        self.model = Some(weights);
+        
+        info!("Qwen2.5 (Quantized) model loaded successfully on {:?}", self.device);
         Ok(())
     }
 
-    /// Executes a forward pass to generate text.
-    pub fn generate_text(&mut self, prompt: &str, max_tokens: usize) -> Result<String, Box<dyn std::error::Error>> {
-        let model = self.model.as_mut().ok_or("Model not loaded")?;
+    fn generate_text(&mut self, prompt: &str, max_tokens: usize) -> Result<String> {
+        let model = self.model.as_mut().ok_or_else(|| SocialKubeError::Inference("Model not loaded".into()))?;
         
-        let tokens = self.tokenizer.encode(prompt, true).map_err(|e| e.to_string())?;
-        let mut tokens = tokens.get_ids().to_vec();
+        let formatted_prompt = config::get_prompt_template(prompt);
+        let tokens = self.tokenizer.encode(formatted_prompt, true)
+            .map_err(|e| SocialKubeError::Inference(format!("Tokenizer error: {:?}", e)))?;
+        
+        let prompt_tokens = tokens.get_ids();
         let mut generated_text = String::new();
+        
+        info!("Starting quantized prefill for {} tokens on {:?}...", prompt_tokens.len(), self.device);
+        let start_prefill = Instant::now();
+        
+        // 1. Prefill (index_pos=0 resets KV cache)
+        let input = Tensor::new(prompt_tokens, &self.device)
+            .map_err(|e| SocialKubeError::Inference(format!("Tensor creation error: {:?}", e)))?
+            .unsqueeze(0)
+            .map_err(|e| SocialKubeError::Inference(format!("Tensor unsqueeze error: {:?}", e)))?;
+        
+        let logits = model.forward(&input, 0)
+            .map_err(|e| SocialKubeError::Inference(format!("Model forward (prefill) error: {:?}", e)))?;
+        
+        let mut next_token = logits.flatten_all()
+            .map_err(|e| SocialKubeError::Inference(format!("Logits flatten error: {:?}", e)))?
+            .argmax(0)
+            .map_err(|e| SocialKubeError::Inference(format!("Argmax error: {:?}", e)))?
+            .to_scalar::<u32>()
+            .map_err(|e| SocialKubeError::Inference(format!("Scalar conversion error: {:?}", e)))?;
+        
+        info!("Prefill finished in {:?}.", start_prefill.elapsed());
+        
+        let mut pos = prompt_tokens.len();
+        let start_gen = Instant::now();
 
         for i in 0..max_tokens {
-            let context_size = tokens.len();
-            let input = Tensor::new(&tokens[context_size - 1..], &self.device)?.unsqueeze(0)?;
-            let logits = model.forward(&input, i, &mut self.cache)?;
-            let logits = logits.squeeze(0)?;
-            let next_token = logits.argmax(0)?.to_scalar::<u32>()?;
-            
-            // Check EOS
-            if let Some(eos) = &self.config.eos_token_id {
-                let is_eos = match eos {
-                    model::LlamaEosToks::Single(id) => next_token == *id,
-                    model::LlamaEosToks::Multiple(ids) => ids.contains(&next_token),
-                };
-                if is_eos { break; }
+            if config::is_eos_token(next_token) {
+                break;
             }
 
-            tokens.push(next_token);
-            let decoded = self.tokenizer.decode(&[next_token], true).map_err(|e| e.to_string())?;
+            let decoded = self.tokenizer.decode(&[next_token], true)
+                .map_err(|e| SocialKubeError::Inference(format!("Decoding error: {:?}", e)))?;
             generated_text.push_str(&decoded);
+
+            // 2. Incremental Step
+            let input = Tensor::new(&[next_token], &self.device)
+                .map_err(|e| SocialKubeError::Inference(format!("Tensor creation error: {:?}", e)))?
+                .unsqueeze(0)
+                .map_err(|e| SocialKubeError::Inference(format!("Tensor unsqueeze error: {:?}", e)))?;
+            
+            let logits = model.forward(&input, pos)
+                .map_err(|e| SocialKubeError::Inference(format!("Model forward step error: {:?}", e)))?;
+            
+            next_token = logits.flatten_all()
+                .map_err(|e| SocialKubeError::Inference(format!("Logits flatten error: {:?}", e)))?
+                .argmax(0)
+                .map_err(|e| SocialKubeError::Inference(format!("Argmax error: {:?}", e)))?
+                .to_scalar::<u32>()
+                .map_err(|e| SocialKubeError::Inference(format!("Scalar conversion error: {:?}", e)))?;
+            
+            pos += 1;
+
+            if (i + 1) % 10 == 0 {
+                let elapsed = start_gen.elapsed().as_secs_f32();
+                if elapsed > 0.0 {
+                    info!("Quantized speed: {:.2} tokens/sec", (i + 1) as f32 / elapsed);
+                }
+            }
         }
 
         Ok(generated_text)

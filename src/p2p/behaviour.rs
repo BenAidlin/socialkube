@@ -81,7 +81,7 @@ impl From<RequestResponseEvent<InferenceRequest, InferenceResponse>> for SocialK
 }
 
 impl SocialKubeBehaviour {
-    pub fn new(local_peer_id: PeerId, local_key: libp2p::identity::Keypair) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(local_peer_id: PeerId, local_key: libp2p::identity::Keypair) -> anyhow::Result<Self> {
         
         // 1. Setup Kademlia (The "Find Me" system)
         let store = MemoryStore::new(local_peer_id);
@@ -96,7 +96,7 @@ impl SocialKubeBehaviour {
         let gossipsub = Gossipsub::new(
             MessageAuthenticity::Signed(local_key.clone()),
             gossipsub_config,
-        )?;
+        ).map_err(|e| anyhow::anyhow!(e))?;
 
         // 3. Setup MDNS (Local Discovery)
         let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), local_peer_id)?;

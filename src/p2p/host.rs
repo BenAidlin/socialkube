@@ -5,10 +5,9 @@ use libp2p::{
     SwarmBuilder,
     tcp, yamux, PeerId,
 };
-use std::error::Error;
 use crate::p2p::behaviour::SocialKubeBehaviour;
 
-pub async fn build_swarm() -> Result<Swarm<SocialKubeBehaviour>, Box<dyn Error>> {
+pub async fn build_swarm() -> anyhow::Result<Swarm<SocialKubeBehaviour>> {
     let local_key = identity::Keypair::generate_ed25519();
     let local_peer_id = PeerId::from(local_key.public());
 

@@ -2,3 +2,4 @@
 /logs
 /ledger
 .DS_Store
+tokenizer.json
