@@ -22,6 +22,7 @@ SocialKube is a decentralized P2P compute network written in Rust. It allows use
 1. **Context Awareness:** Always check @src/p2p/behaviour.rs before suggesting networking changes.
 2. **Step-by-Step:** For complex features (like sharding logic), provide a checklist first.
 3. **P2P Priority:** When designing features, consider the "Offline" state (what happens if a peer leaves?).
+4. **Commit Policy:** Never commit changes without getting explicit user permission first.
 
 ## Key Files
 - @src/main.rs: Main entry and swarm loop.
