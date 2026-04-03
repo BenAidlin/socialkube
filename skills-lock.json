@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "skills": {
+    "code-reviewer": {
+      "source": "Jeffallan/claude-skills",
+      "sourceType": "github",
+      "computedHash": "74fef44bfb03c7ff3d8c366d8ee237621f0c0687aa5868d34d9c06a8ba062109"
+    },
+    "nextjs-developer": {
+      "source": "Jeffallan/claude-skills",
+      "sourceType": "github",
+      "computedHash": "574c295ef59cdc324c390920f9a0e26cc908dc43493b973cf265ba7d913a94f2"
+    },
+    "review-rust-docs": {
+      "source": "redisearch/redisearch",
+      "sourceType": "github",
+      "computedHash": "a87078f201be044e73cb0c9ea32779f46394db66a634eb5b9d37d5a28f110e5c"
+    },
+    "rust-engineer": {
+      "source": "Jeffallan/claude-skills",
+      "sourceType": "github",
+      "computedHash": "5a8b4c69ded4bec7009af144c8aea3de5f463765f211c780afea8d7a47fb35e6"
+    }
+  }
+}

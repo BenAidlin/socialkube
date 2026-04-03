@@ -37,3 +37,22 @@ pub fn is_eos_token(token_id: u32) -> bool {
     // Qwen2.5 EOS tokens: 151643 (<|endoftext|>), 151645 (<|im_end|>)
     token_id == 151643 || token_id == 151645
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_prompt_template() {
+        let prompt = "hello";
+        let expected = "<|im_start|>user\nhello<|im_end|>\n<|im_start|>assistant\n";
+        assert_eq!(get_prompt_template(prompt), expected);
+    }
+
+    #[test]
+    fn test_eos_tokens() {
+        assert!(is_eos_token(151643));
+        assert!(is_eos_token(151645));
+        assert!(!is_eos_token(100));
+    }
+}

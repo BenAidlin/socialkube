@@ -41,7 +41,7 @@ pub struct InferenceRequest {
     pub prompt: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct InferenceResponse {
     pub result: String,
     pub error: Option<String>,
@@ -101,4 +101,103 @@ async fn do_inference(
         result: String::new(),
         error: Some("Inference backend is not yet initialized or model is still downloading...".to_string()),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::{Request, StatusCode};
+    use tower::util::ServiceExt; 
+    use crate::error::Result;
+
+    struct MockBackend {
+        should_fail: bool,
+    }
+
+    impl ModelBackend for MockBackend {
+        fn clear_kv_cache(&mut self) {}
+        fn load_model(&mut self, _paths: Vec<std::path::PathBuf>) -> Result<()> { Ok(()) }
+        fn generate_text(&mut self, _prompt: &str, _max_tokens: usize) -> Result<String> {
+            if self.should_fail {
+                Err(crate::error::SocialKubeError::Inference("Mock failure".into()))
+            } else {
+                Ok("Mocked response".into())
+            }
+        }
+    }
+
+    fn setup_test_state(backend: Option<Box<dyn ModelBackend>>) -> AppState {
+        AppState {
+            shard_assignments: vec![],
+            hw_profile: HardwareProfile {
+                cpu_model: "test".into(),
+                cpu_cores: 1,
+                total_ram_gb: 8,
+                gpu_name: None,
+                vram_gb: None,
+            },
+            backend: Arc::new(Mutex::new(backend)),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_status() {
+        let state = setup_test_state(None);
+        let app = create_router(state);
+
+        let response = app
+            .oneshot(Request::builder().uri("/status").body(axum::body::Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_inference_success() {
+        let backend = Box::new(MockBackend { should_fail: false });
+        let state = setup_test_state(Some(backend));
+        let app = create_router(state);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/inference")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(format!(
+                r#"{{"model_id": "{}", "prompt": "hello"}}"#,
+                config::DEFAULT_MODEL_ID
+            )))
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        
+        let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+        let res: InferenceResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(res.result, "Mocked response");
+        assert!(res.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_inference_no_backend() {
+        let state = setup_test_state(None);
+        let app = create_router(state);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/inference")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(format!(
+                r#"{{"model_id": "{}", "prompt": "hello"}}"#,
+                config::DEFAULT_MODEL_ID
+            )))
+            .unwrap();
+
+        let response = app.oneshot(req).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+        let res: InferenceResponse = serde_json::from_slice(&body).unwrap();
+        
+        assert!(res.result.is_empty());
+        assert!(res.error.unwrap().contains("not yet initialized"));
+    }
 }

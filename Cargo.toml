@@ -30,6 +30,7 @@ candle-nn = { version = "0.8", features = ["metal"] }
 candle-transformers = { version = "0.8", features = ["metal"] }
 thiserror = "2.0.18"
 anyhow = "1.0"
+tower = { version = "0.5.3", features = ["util"] }
 # candle-flash-attn = { version = "0.8", optional = true }
 [profile.release]
 lto = true
