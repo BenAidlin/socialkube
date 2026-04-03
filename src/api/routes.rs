@@ -11,6 +11,7 @@ use tracing::info;
 use crate::engine::benchmark::HardwareProfile;
 use crate::engine::sharder::ShardMetadata;
 use crate::engine::backend::ModelBackend;
+use crate::engine::memory::ConversationMemory;
 use crate::config;
 
 #[derive(Clone)]
@@ -18,6 +19,7 @@ pub struct AppState {
     pub shard_assignments: Vec<ShardMetadata>,
     pub hw_profile: HardwareProfile,
     pub backend: Arc<Mutex<Option<Box<dyn ModelBackend>>>>,
+    pub memory: Arc<ConversationMemory>,
 }
 
 #[derive(Serialize)]
@@ -39,6 +41,7 @@ pub struct ModelInfo {
 pub struct InferenceRequest {
     pub model_id: String,
     pub prompt: String,
+    pub session_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -47,11 +50,17 @@ pub struct InferenceResponse {
     pub error: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct ClearSessionRequest {
+    pub session_id: String,
+}
+
 pub fn create_router(state: AppState) -> Router {
     Router::new()
         // Legacy/Frontend expected routes
         .route("/api/models", get(get_models))
         .route("/api/inference", post(do_inference))
+        .route("/api/clear_session", post(clear_session))
         // New management routes
         .route("/status", get(get_status))
         .with_state(state)
@@ -77,6 +86,14 @@ async fn get_status(State(state): State<AppState>) -> Json<StatusResponse> {
     })
 }
 
+async fn clear_session(
+    State(state): State<AppState>,
+    Json(payload): Json<ClearSessionRequest>,
+) -> Json<StatusResponse> {
+    state.memory.clear_session(&payload.session_id);
+    get_status(State(state)).await
+}
+
 async fn do_inference(
     State(state): State<AppState>,
     Json(payload): Json<InferenceRequest>,
@@ -87,8 +104,15 @@ async fn do_inference(
     
     if let Some(backend) = backend_lock.as_mut() {
         if payload.model_id == config::DEFAULT_MODEL_ID {
-             match backend.generate_text(&payload.prompt, config::DEFAULT_MAX_TOKENS) {
-                 Ok(result) => return Json(InferenceResponse { result, error: None }),
+             let history = payload.session_id.as_ref().and_then(|id| state.memory.get_history(id));
+             
+             match backend.generate_text(&payload.prompt, config::DEFAULT_MAX_TOKENS, history.as_deref()) {
+                 Ok(result) => {
+                     if let Some(session_id) = &payload.session_id {
+                         state.memory.add_turn(session_id, payload.prompt.clone(), result.clone());
+                     }
+                     return Json(InferenceResponse { result, error: None });
+                 },
                  Err(e) => return Json(InferenceResponse { 
                      result: String::new(), 
                      error: Some(format!("Generation Error: {:?}", e)) 
@@ -109,6 +133,7 @@ mod tests {
     use axum::http::{Request, StatusCode};
     use tower::util::ServiceExt; 
     use crate::error::Result;
+    use crate::engine::types::ChatTurn;
 
     struct MockBackend {
         should_fail: bool,
@@ -117,7 +142,7 @@ mod tests {
     impl ModelBackend for MockBackend {
         fn clear_kv_cache(&mut self) {}
         fn load_model(&mut self, _paths: Vec<std::path::PathBuf>) -> Result<()> { Ok(()) }
-        fn generate_text(&mut self, _prompt: &str, _max_tokens: usize) -> Result<String> {
+        fn generate_text(&mut self, _prompt: &str, _max_tokens: usize, _history: Option<&[ChatTurn]>) -> Result<String> {
             if self.should_fail {
                 Err(crate::error::SocialKubeError::Inference("Mock failure".into()))
             } else {
@@ -137,6 +162,7 @@ mod tests {
                 vram_gb: None,
             },
             backend: Arc::new(Mutex::new(backend)),
+            memory: Arc::new(ConversationMemory::default()),
         }
     }
 

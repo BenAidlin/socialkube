@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use crate::error::{Result, SocialKubeError};
 use crate::config;
+use crate::engine::types::ChatTurn;
 
 /// Trait for different LLM inference backends.
 pub trait ModelBackend: Send + Sync {
@@ -16,8 +17,8 @@ pub trait ModelBackend: Send + Sync {
     /// Loads the model weights from the provided paths.
     fn load_model(&mut self, weights_paths: Vec<PathBuf>) -> Result<()>;
 
-    /// Generates text from a prompt.
-    fn generate_text(&mut self, prompt: &str, max_tokens: usize) -> Result<String>;
+    /// Generates text from a prompt, optionally including session history.
+    fn generate_text(&mut self, prompt: &str, max_tokens: usize, history: Option<&[ChatTurn]>) -> Result<String>;
 }
 
 /// A specialized backend for Qwen2.5 models using GGUF quantization.
@@ -80,10 +81,17 @@ impl ModelBackend for QwenBackend {
         Ok(())
     }
 
-    fn generate_text(&mut self, prompt: &str, max_tokens: usize) -> Result<String> {
+    fn generate_text(&mut self, prompt: &str, max_tokens: usize, history: Option<&[ChatTurn]>) -> Result<String> {
         let model = self.model.as_mut().ok_or_else(|| SocialKubeError::Inference("Model not loaded".into()))?;
         
-        let formatted_prompt = config::get_prompt_template(prompt);
+        let mut formatted_prompt = String::new();
+        if let Some(history) = history {
+            for turn in history {
+                formatted_prompt.push_str(&format!("<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n{}<|im_end|>\n", turn.user, turn.assistant));
+            }
+        }
+        formatted_prompt.push_str(&config::get_prompt_template(prompt));
+
         let tokens = self.tokenizer.encode(formatted_prompt, true)
             .map_err(|e| SocialKubeError::Inference(format!("Tokenizer error: {:?}", e)))?;
         

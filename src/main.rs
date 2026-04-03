@@ -43,10 +43,13 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize Shared Engine Backend
     let shared_backend: Arc<tokio::sync::Mutex<Option<Box<dyn ModelBackend>>>> = Arc::new(tokio::sync::Mutex::new(None));
+    let shared_memory = Arc::new(engine::memory::ConversationMemory::default());
+    
     let app_state = api::routes::AppState {
         shard_assignments: shard_assignments.as_ref().clone(),
         hw_profile: hw_profile.clone(),
         backend: shared_backend.clone(),
+        memory: shared_memory.clone(),
     };
 
     // Trigger Model Downloads and Backend Initialization
