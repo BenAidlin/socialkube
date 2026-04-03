@@ -32,8 +32,8 @@ impl ModelDownloader {
     }
 
     /// Iterates through shard assignments and ensures necessary files are downloaded.
-    /// Returns a list of (model_id, Vec<weights_path>) for successfully downloaded models.
-    pub async fn check_and_download_models(&self, assignments: &[ShardMetadata]) -> Vec<(String, Vec<PathBuf>)> {
+    /// Returns a list of (model_id, Vec<weights_path>, tokenizer_path) for successfully downloaded models.
+    pub async fn check_and_download_models(&self, assignments: &[ShardMetadata]) -> Vec<(String, Vec<PathBuf>, PathBuf)> {
         let mut downloaded = Vec::new();
         for assignment in assignments {
             let (repo_id, filenames) = match assignment.model_id.as_str() {
@@ -44,11 +44,15 @@ impl ModelDownloader {
                 _ => continue,
             };
 
-            // Download Tokenizer (Still needed for some engines, though GGUF has one built-in)
+            // Download Tokenizer
             let tokenizer_repo = config::TOKENIZER_REPO;
-            if let Err(e) = self.download_file(tokenizer_repo, "tokenizer.json").await {
-                error!("Failed to download tokenizer for {}: {:?}", tokenizer_repo, e);
-            }
+            let tokenizer_path = match self.download_file(tokenizer_repo, "tokenizer.json").await {
+                Ok(path) => path,
+                Err(e) => {
+                    error!("Failed to download tokenizer for {}: {:?}", tokenizer_repo, e);
+                    continue; // Skip model if tokenizer fails
+                }
+            };
 
             let mut paths = Vec::new();
             let mut success = true;
@@ -64,7 +68,7 @@ impl ModelDownloader {
             }
 
             if success {
-                downloaded.push((assignment.model_id.clone(), paths));
+                downloaded.push((assignment.model_id.clone(), paths, tokenizer_path));
             }
         }
         downloaded

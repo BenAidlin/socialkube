@@ -1,0 +1,24 @@
+# Rust build artifacts
+target/
+
+# Node.js dependencies
+node_modules/
+web/node_modules/
+web/.next/
+
+# Version control
+.git/
+
+# Logs and local databases
+logs/
+ledger/
+*.log
+
+# Docker/Compose files
+Dockerfile
+docker-compose.yaml
+
+# IDE files
+.vscode/
+.idea/
+.DS_Store

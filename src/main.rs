@@ -60,16 +60,13 @@ async fn main() -> anyhow::Result<()> {
             let downloaded = downloader.check_and_download_models(&assignments_clone).await;
             
             // If we downloaded the base model, initialize the backend
-            if let Some((_id, paths)) = downloaded.iter().find(|(id, _)| id == config::DEFAULT_MODEL_ID) {
+            if let Some((_id, paths, tokenizer_path)) = downloaded.iter().find(|(id, _, _)| id == config::DEFAULT_MODEL_ID) {
                 info!("Initializing Inference Backend for {} ({} files)...", config::DEFAULT_MODEL_ID, paths.len());
                 
-                // Copy tokenizer from the first weight path's parent
-                if let Some(first_path) = paths.first() {
-                    let tokenizer_src = first_path.parent().unwrap().join("tokenizer.json");
-                    let tokenizer_dst = config::get_tokenizer_path();
-                    if let Err(e) = std::fs::copy(&tokenizer_src, &tokenizer_dst) {
-                        error!("Failed to copy tokenizer from {:?} to {:?}: {:?}", tokenizer_src, tokenizer_dst, e);
-                    }
+                // Copy tokenizer from the downloaded location to current directory
+                let tokenizer_dst = config::get_tokenizer_path();
+                if let Err(e) = std::fs::copy(&tokenizer_path, &tokenizer_dst) {
+                    error!("Failed to copy tokenizer from {:?} to {:?}: {:?}", tokenizer_path, tokenizer_dst, e);
                 }
 
                 match QwenBackend::new() {
@@ -88,15 +85,19 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    // Start Axum API Server (on port 3001 to avoid Next.js conflict)
+    // Start Axum API Server
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any);
 
     let app = api::routes::create_router(app_state.clone()).layer(cors);
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3001").await?;
-    info!("API Server listening on http://localhost:3001");
+    
+    let port = std::env::var("PORT").unwrap_or_else(|_| "3001".to_string());
+    let addr = format!("0.0.0.0:{}", port);
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    info!("API Server listening on http://{}", addr);
+
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
             error!("API Server error: {:?}", e);

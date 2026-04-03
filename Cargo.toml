@@ -25,9 +25,9 @@ sysinfo = "0.30"
 duckdb = { version = "1.10500.0", features = ["bundled", "r2d2"] }
 hf-hub = { version = "0.4", features = ["tokio"] }
 tokenizers = "0.19"
-candle-core = { version = "0.8", features = ["metal"] }
-candle-nn = { version = "0.8", features = ["metal"] }
-candle-transformers = { version = "0.8", features = ["metal"] }
+candle-core = { version = "0.8" }
+candle-nn = { version = "0.8" }
+candle-transformers = { version = "0.8" }
 thiserror = "2.0.18"
 anyhow = "1.0"
 tower = { version = "0.5.3", features = ["util"] }
